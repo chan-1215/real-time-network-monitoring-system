@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Packet Watcher</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">REAL-TIME NETWORK MONITORING</p>
+      <h1>Packet Watcher</h1>
+    </div>
+    <div class="actions">
+      <span id="status" class="status">Connecting...</span>
+      <button id="resetButton" class="danger-button">Reset</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="metric-grid">
+      <article class="metric-card"><span>Total Packets</span><strong id="totalPackets">0</strong></article>
+      <article class="metric-card"><span>Danger Events</span><strong id="dangerEvents">0</strong></article>
+      <article class="metric-card"><span>Tracked IPs</span><strong id="trackedIps">0</strong></article>
+      <article class="metric-card"><span>Refresh</span><strong>2s</strong></article>
+    </section>
+
+    <section class="two-column">
+      <article class="panel">
+        <div class="panel-title"><h2>Traffic Trend</h2><span>recent bytes/min</span></div>
+        <canvas id="trafficChart" width="900" height="280"></canvas>
+      </article>
+
+      <article class="panel">
+        <div class="panel-title"><h2>Top IPs</h2><span>recent activity</span></div>
+        <div id="topIps" class="ip-list"></div>
+      </article>
+    </section>
+
+    <section class="panel logs-panel">
+      <div class="panel-title"><h2>Packet Logs</h2><span>latest 100 packets</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th><th>Source</th><th>Destination</th><th>Protocol</th><th>Length</th><th>State</th>
+            </tr>
+          </thead>
+          <tbody id="packetRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function endpoint(ip, port) {
+  if (!ip) return '-';
+  return port === null || port === undefined ? ip : `${ip}:${port}`;
+}
+
+function shortTime(timestamp) {
+  if (!timestamp) return '-';
+  const d = new Date(timestamp);
+  return Number.isNaN(d.getTime()) ? timestamp : d.toLocaleTimeString();
+}
+
+function drawTraffic(items) {
+  const canvas = $('trafficChart');
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const pad = 34;
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.strokeStyle = '#263449';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    const y = pad + ((height - pad * 2) / 4) * i;
+    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(width - pad, y); ctx.stroke();
+  }
+
+  if (!items.length) return;
+  const maxValue = Math.max(...items.map(item => item.bytes), 1);
+  const step = items.length > 1 ? (width - pad * 2) / (items.length - 1) : 0;
+
+  ctx.strokeStyle = '#60a5fa';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  items.forEach((item, index) => {
+    const x = pad + index * step;
+    const y = height - pad - (item.bytes / maxValue) * (height - pad * 2);
+    if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+async function refresh() {
+  try {
+    const [statsRes, packetsRes, healthRes] = await Promise.all([
+      fetch('/api/stats'), fetch('/api/packets?size=100'), fetch('/health')
+    ]);
+    const stats = await statsRes.json();
+    const packets = await packetsRes.json();
+    const health = await healthRes.json();
+
+    $('status').textContent = health.ok ? 'Elasticsearch Online' : 'Elasticsearch Offline';
+    $('status').className = health.ok ? 'status online' : 'status offline';
+    $('totalPackets').textContent = stats.total_packets.toLocaleString();
+    $('dangerEvents').textContent = stats.danger_events.toLocaleString();
+    $('trackedIps').textContent = stats.top_ips.length.toLocaleString();
+
+    $('topIps').innerHTML = stats.top_ips.length
+      ? stats.top_ips.map((item, i) => `<div class="ip-row"><span>${i + 1}. ${item.ip}</span><strong>${item.count}</strong></div>`).join('')
+      : '<p class="empty">No packet data</p>';
+
+    $('packetRows').innerHTML = packets.packets.length
+      ? packets.packets.map(packet => `
+        <tr class="${packet.danger ? 'danger-row' : ''}">
+          <td>${shortTime(packet.timestamp)}</td>
+          <td>${endpoint(packet.src_ip, packet.src_port)}</td>
+          <td>${endpoint(packet.dst_ip, packet.dst_port)}</td>
+          <td>${packet.protocol || '-'}</td>
+          <td>${packet.length || 0}</td>
+          <td><span class="badge ${packet.danger ? 'danger' : 'normal'}">${packet.danger ? 'Danger' : 'Normal'}</span></td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="empty">No packet data</td></tr>';
+
+    drawTraffic(stats.traffic || []);
+  } catch (error) {
+    $('status').textContent = 'Connection Error';
+    $('status').className = 'status offline';
+  }
+}
+
+$('resetButton').addEventListener('click', async () => {
+  if (!confirm('저장된 패킷 데이터를 초기화할까요?')) return;
+  await fetch('/api/reset', {method: 'POST'});
+  refresh();
+});
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
