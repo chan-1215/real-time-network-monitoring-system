@@ -1,0 +1,15 @@
+[Unit]
+Description=Packet Watcher Flask/Gunicorn Service
+After=network.target elasticsearch.service
+
+[Service]
+User=master
+Group=www-data
+WorkingDirectory=/home/master/projects/packetwatcher
+Environment="PATH=/home/master/projects/packetwatcher/venv/bin"
+ExecStart=/home/master/projects/packetwatcher/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5000 app:app
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
