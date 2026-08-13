@@ -1,0 +1,32 @@
+# Restored Packetbeat configuration from the project architecture.
+# Packetbeat was used during the packet collection -> Elasticsearch pipeline.
+
+packetbeat.interfaces.device: any
+
+packetbeat.flows:
+  timeout: 30s
+  period: 10s
+
+packetbeat.protocols:
+  - type: icmp
+    enabled: true
+  - type: dns
+    ports: [53]
+  - type: http
+    ports: [80, 8080, 8000, 5000]
+  - type: tls
+    ports: [443]
+
+processors:
+  - add_host_metadata: ~
+
+output.elasticsearch:
+  hosts: ["http://localhost:9200"]
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/packetbeat
+  name: packetbeat
+  keepfiles: 7
+  permissions: 0644
